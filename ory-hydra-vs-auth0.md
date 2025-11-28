@@ -180,3 +180,29 @@
 5. Auth0 issues tokens and redirects back to your app
 6. Your services validate tokens using Auth0's public keys
 
+## Abbreviations
+
+**JWT** - JSON Web Token  
+A compact, URL-safe token format used to securely transmit information between parties as a JSON object.
+
+**JWK** - JSON Web Key  
+A JSON data structure that represents a cryptographic key used for signing and verifying JWTs.
+
+**IDaaS** - Identity-as-a-Service  
+A cloud-based service that provides identity and access management capabilities without requiring on-premises infrastructure.
+
+**SSO** - Single Sign-On  
+An authentication method that allows users to access multiple applications with one set of login credentials.
+
+**MFA** - Multi-Factor Authentication  
+A security method that requires users to provide two or more verification factors to gain access to an account.
+
+**UI** - User Interface  
+The visual elements and controls that users interact with in an application or system.
+
+**PKCE** - Proof Key for Code Exchange  
+A security extension to OAuth 2.0 that prevents authorization code interception attacks in public clients.
+
+**OIDC** - OpenID Connect  
+An identity layer built on top of OAuth 2.0 that provides authentication and user information through ID tokens.
+
