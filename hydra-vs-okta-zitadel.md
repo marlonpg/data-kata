@@ -50,59 +50,56 @@
 
 ## Trade-offs: Hydra vs Okta vs Zitadel
 
-### Using Hydra
+### Ory Hydra
+```
+PROS (+) 
+  * Cost: Open source with no licensing fees, only infrastructure costs.
+  * Flexibility: Complete control over UI/UX and authentication flows.
+  * Performance: Lightweight footprint, minimal resource usage.
+  * Vendor Independence: No lock-in, can migrate or modify freely.
+  * Security: Battle-tested OAuth/OIDC implementation, proven in production.
+CONS (-)
+  * Development Effort: Must build entire user management system from scratch.
+  * Expertise Required: Needs OAuth/OIDC knowledge and security best practices.
+  * Maintenance: Ongoing responsibility for user database, UI, and integrations.
+  * Time to Market: Longer development cycle for complete authentication solution.
+  * Enterprise Features: No built-in MFA, SSO, or admin tools.
+```
 
-**Pros:**
-- ✅ Minimal footprint and focused scope
-- ✅ Maximum flexibility in UI and user experience
-- ✅ Lightweight and fast performance
-- ✅ Simple to understand and deploy
-- ✅ No vendor lock-in with open source
-- ✅ Battle-tested OAuth/OIDC implementation
+### Okta
+```
+PROS (+) 
+  * Reliability: 99.99% SLA with enterprise-grade infrastructure.
+  * Scale: Proven to handle millions of users across global deployments.
+  * Integrations: 7,000+ pre-built connectors for popular applications.
+  * Security: Advanced MFA, adaptive authentication, and compliance certifications.
+  * Support: 24/7 enterprise support with professional services available.
+  * Time to Market: Fastest deployment with hosted login and admin interfaces.
+CONS (-)
+  * Cost: Expensive per-user pricing that scales linearly with growth.
+  * Vendor Lock-in: Proprietary APIs and data formats limit migration options.
+  * Customization: Limited ability to modify authentication flows and UI.
+  * Data Control: User data stored on Okta's infrastructure, not yours.
+  * Flexibility: Less control over infrastructure deployment and configuration.
+```
 
-**Cons:**
-- ❌ Must build entire user management system
-- ❌ No built-in admin interface
-- ❌ Requires OAuth/OIDC expertise
-- ❌ Manual integration with identity providers
-- ❌ Higher development effort for complete solution
-- ❌ No enterprise features out-of-the-box
-
-### Using Okta
-
-**Pros:**
-- ✅ Enterprise-grade reliability and uptime (99.99% SLA)
-- ✅ Massive scale proven (handles millions of users)
-- ✅ 7,000+ pre-built app integrations
-- ✅ Advanced security features and compliance certifications
-- ✅ Comprehensive admin tools and analytics
-- ✅ 24/7 enterprise support and professional services
-
-**Cons:**
-- ❌ Expensive per-user pricing model
-- ❌ Vendor lock-in with proprietary APIs
-- ❌ Limited customization of authentication flows
-- ❌ Data stored on third-party infrastructure
-- ❌ Costs scale linearly with user growth
-- ❌ Less control over infrastructure and deployment
-
-### Using Zitadel
-
-**Pros:**
-- ✅ Modern architecture with event sourcing
-- ✅ Excellent developer experience and APIs
-- ✅ Built-in multi-tenancy and white-labeling
-- ✅ Strong security with passwordless options
-- ✅ Cloud-native design and scalability
-- ✅ Active development and innovation
-
-**Cons:**
-- ❌ Newer project with smaller community
-- ❌ Less proven at massive enterprise scale
-- ❌ Fewer third-party integrations
-- ❌ Learning curve for event sourcing concepts
-- ❌ Limited enterprise support options
-- ❌ Potential breaking changes in early versions
+### Zitadel
+```
+PROS (+) 
+  * Architecture: Modern event sourcing provides audit trails and data consistency.
+  * Developer Experience: API-first design with excellent documentation and tooling.
+  * Multi-tenancy: Built-in support for multiple organizations and white-labeling.
+  * Security: Passwordless authentication with WebAuthn and FIDO2 support.
+  * Innovation: Active development with modern features and cloud-native design.
+  * Cost: Open source with reasonable cloud pricing for managed service.
+CONS (-)
+  * Maturity: Newer project with smaller community and ecosystem.
+  * Scale: Less proven at massive enterprise scale compared to established players.
+  * Integrations: Fewer third-party connectors compared to mature platforms.
+  * Learning Curve: Event sourcing concepts may be unfamiliar to teams.
+  * Support: Limited enterprise support options compared to commercial vendors.
+  * Stability: Potential for breaking changes as project evolves.
+```
 
 ## What You Build with Each Solution:
 
