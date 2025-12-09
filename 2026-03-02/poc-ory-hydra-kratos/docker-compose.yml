@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for Hydra
+  hydra-db:
+    image: postgres:15-alpine
+    container_name: ory-hydra-db
+    environment:
+      POSTGRES_USER: hydra
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: hydra
+    ports:
+      - "5432:5432"
+    networks:
+      - ory-network
+    volumes:
+      - hydra-db-data:/var/lib/postgresql/data
+
+  # PostgreSQL for Kratos
+  kratos-db:
+    image: postgres:15-alpine
+    container_name: ory-kratos-db
+    environment:
+      POSTGRES_USER: kratos
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: kratos
+    ports:
+      - "5433:5432"
+    networks:
+      - ory-network
+    volumes:
+      - kratos-db-data:/var/lib/postgresql/data
+
+  # Ory Hydra - OAuth/OIDC Server
+  hydra-migrate:
+    image: oryd/hydra:v2.2.0
+    container_name: ory-hydra-migrate
+    environment:
+      DSN: postgres://hydra:secret@hydra-db:5432/hydra?sslmode=disable
+    command: migrate sql -e --yes
+    depends_on:
+      - hydra-db
+    networks:
+      - ory-network
+    restart: on-failure
+
+  hydra:
+    image: oryd/hydra:v2.2.0
+    container_name: ory-hydra
+    ports:
+      - "4444:4444" # Public API
+      - "4445:4445" # Admin API
+    command: serve all --dev
+    environment:
+      URLS_SELF_ISSUER: http://localhost:4444
+      URLS_CONSENT: http://localhost:3000/consent
+      URLS_LOGIN: http://localhost:3000/login
+      URLS_LOGOUT: http://localhost:3000/logout
+      DSN: postgres://hydra:secret@hydra-db:5432/hydra?sslmode=disable
+      SECRETS_SYSTEM: youReallyNeedToChangeThis
+      OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES: public,pairwise
+      OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT: youReallyNeedToChangeThis
+      SERVE_COOKIES_SAME_SITE_MODE: Lax
+    depends_on:
+      - hydra-migrate
+    networks:
+      - ory-network
+    restart: unless-stopped
+
+  # Ory Kratos - Identity Management
+  kratos-migrate:
+    image: oryd/kratos:v1.1.0
+    container_name: ory-kratos-migrate
+    environment:
+      DSN: postgres://kratos:secret@kratos-db:5432/kratos?sslmode=disable
+    volumes:
+      - ./kratos:/etc/config/kratos
+    command: migrate sql -e --yes
+    depends_on:
+      - kratos-db
+    networks:
+      - ory-network
+    restart: on-failure
+
+  kratos:
+    image: oryd/kratos:v1.1.0
+    container_name: ory-kratos
+    ports:
+      - "4433:4433" # Public API
+      - "4434:4434" # Admin API
+    environment:
+      DSN: postgres://kratos:secret@kratos-db:5432/kratos?sslmode=disable
+      LOG_LEVEL: trace
+    command: serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
+    volumes:
+      - ./kratos:/etc/config/kratos
+    depends_on:
+      - kratos-migrate
+    networks:
+      - ory-network
+    restart: unless-stopped
+
+  # MailSlurper - Email testing (catches emails sent by Kratos)
+  mailslurper:
+    image: oryd/mailslurper:latest-smtps
+    container_name: ory-mailslurper
+    ports:
+      - "4436:4436" # Web UI
+      - "4437:4437" # SMTP
+    networks:
+      - ory-network
+
+networks:
+  ory-network:
+    driver: bridge
+
+volumes:
+  hydra-db-data:
+  kratos-db-data:
