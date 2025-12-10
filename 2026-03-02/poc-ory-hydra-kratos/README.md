@@ -267,3 +267,203 @@ docker-compose ps
 - [Ory Kratos Docs](https://www.ory.sh/kratos/docs/)
 - [Ory Community](https://community.ory.sh/)
 - [Example Integration](https://github.com/ory/hydra-login-consent-node)
+- [OAuth 2.0 Playground](https://www.oauth.com/playground/)
+- [JWT Decoder](https://jwt.io/)
+
+
+## Complete End-to-End Flow with cURL
+
+### Scenario: Register User + OAuth Login Flow
+
+This demonstrates the complete flow from user registration to getting OAuth tokens.
+
+#### Prerequisites
+
+1. Start all services: `docker-compose up -d`
+2. Create an OAuth client first:
+
+```bash
+docker exec ory-hydra hydra create client \
+  --endpoint http://localhost:4445 \
+  --name "My Test App" \
+  --grant-type authorization_code,refresh_token \
+  --response-type code \
+  --scope openid,offline,email \
+  --redirect-uri http://localhost:3000/callback
+```
+
+Save the `client_id` and `client_secret` from output.
+
+---
+
+### Step 1: Register a New User (Kratos)
+
+**1.1 Initialize registration flow:**
+```bash
+curl -X GET http://localhost:4433/self-service/registration/api
+```
+
+Save the `flow_id` from the response (e.g., `"id": "abc123..."`).
+
+**1.2 Complete registration:**
+```bash
+curl -X POST http://localhost:4433/self-service/registration?flow=<FLOW_ID> \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "password",
+    "traits": {
+      "email": "user@example.com",
+      "name": {
+        "first": "John",
+        "last": "Doe"
+      }
+    },
+    "password": "SecurePassword123!"
+  }'
+```
+
+User is now registered in Kratos! Save the `session_token` from response.
+
+---
+
+### Step 2: OAuth Login Flow (Hydra + Kratos)
+
+**2.1 Start OAuth authorization (simulating browser redirect):**
+```bash
+curl -v "http://localhost:4444/oauth2/auth?client_id=<CLIENT_ID>&response_type=code&scope=openid%20offline%20email&redirect_uri=http://localhost:3000/callback&state=random_state_string"
+```
+
+This will return a redirect to the login page. Extract the `login_challenge` from the redirect URL.
+
+**2.2 Get login challenge details:**
+```bash
+curl "http://localhost:4445/admin/oauth2/auth/requests/login?login_challenge=<LOGIN_CHALLENGE>"
+```
+
+**2.3 Initialize Kratos login flow:**
+```bash
+curl -X GET http://localhost:4433/self-service/login/api
+```
+
+Save the `flow_id`.
+
+**2.4 Submit login credentials to Kratos:**
+```bash
+curl -X POST "http://localhost:4433/self-service/login?flow=<FLOW_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "password",
+    "identifier": "user@example.com",
+    "password": "SecurePassword123!"
+  }'
+```
+
+Kratos validates credentials and returns session. Save the `session_token`.
+
+**2.5 Accept login challenge (tell Hydra user is authenticated):**
+```bash
+curl -X PUT "http://localhost:4445/admin/oauth2/auth/requests/login/accept?login_challenge=<LOGIN_CHALLENGE>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": "user@example.com",
+    "remember": true,
+    "remember_for": 3600
+  }'
+```
+
+This returns a `redirect_to` URL with a `consent_challenge`.
+
+**2.6 Get consent challenge details:**
+```bash
+curl "http://localhost:4445/admin/oauth2/auth/requests/consent?consent_challenge=<CONSENT_CHALLENGE>"
+```
+
+**2.7 Accept consent (user approves app access):**
+```bash
+curl -X PUT "http://localhost:4445/admin/oauth2/auth/requests/consent/accept?consent_challenge=<CONSENT_CHALLENGE>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "grant_scope": ["openid", "offline", "email"],
+    "grant_access_token_audience": [],
+    "remember": true,
+    "remember_for": 3600,
+    "session": {
+      "id_token": {
+        "email": "user@example.com"
+      }
+    }
+  }'
+```
+
+This returns a `redirect_to` URL with an authorization `code`.
+
+**2.8 Exchange authorization code for tokens:**
+```bash
+curl -X POST http://localhost:4444/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -u "<CLIENT_ID>:<CLIENT_SECRET>" \
+  -d "grant_type=authorization_code&code=<AUTHORIZATION_CODE>&redirect_uri=http://localhost:3000/callback"
+```
+
+**Success!** You now have:
+- `access_token` - Use to access APIs
+- `id_token` - Contains user identity info
+- `refresh_token` - Use to get new access tokens
+
+---
+
+### Step 3: Validate and Use Tokens
+
+**3.1 Introspect access token:**
+```bash
+curl -X POST http://localhost:4444/admin/oauth2/introspect \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "token=<ACCESS_TOKEN>"
+```
+
+**3.2 Get user info (OIDC):**
+```bash
+curl http://localhost:4444/userinfo \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
+**3.3 Refresh access token:**
+```bash
+curl -X POST http://localhost:4444/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -u "<CLIENT_ID>:<CLIENT_SECRET>" \
+  -d "grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>"
+```
+
+---
+
+### Simplified Flow Summary
+
+```
+REGISTRATION (One-time):
+1. Initialize registration flow → Get flow_id
+2. Submit registration data to Kratos
+3. User account created ✓
+
+OAUTH LOGIN (Every time):
+1. App redirects to Hydra /oauth2/auth → Get login_challenge
+2. Initialize Kratos login flow → Get flow_id
+3. Submit credentials to Kratos → Get session
+4. Accept login challenge in Hydra → Get consent_challenge
+5. Accept consent challenge → Get authorization code
+6. Exchange code for tokens → Get access_token, id_token, refresh_token ✓
+```
+
+---
+
+### Quick Test Script
+
+For easier testing, you can use the Kratos UI at http://localhost:4455 (if added to docker-compose):
+
+1. Visit http://localhost:4455/registration
+2. Register a new user
+3. Visit http://localhost:4455/login
+4. Login with credentials
+5. Check session: http://localhost:4455/sessions
+
+This UI handles all the Kratos API calls for you!
