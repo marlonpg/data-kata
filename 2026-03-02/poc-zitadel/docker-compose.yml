@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for Zitadel
+  zitadel-db:
+    image: postgres:15-alpine
+    container_name: zitadel-db
+    environment:
+      POSTGRES_USER: zitadel
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: zitadel
+    ports:
+      - "5432:5432"
+    networks:
+      - zitadel-network
+    volumes:
+      - zitadel-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zitadel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Zitadel - Complete IAM Platform
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:latest
+    container_name: zitadel
+    command: 'start-from-init --masterkeyFromEnv --tlsMode disabled'
+    ports:
+      - "8080:8080"
+    environment:
+      ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
+      ZITADEL_DATABASE_POSTGRES_PORT: 5432
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: secret
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: secret
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      ZITADEL_EXTERNALSECURE: 'false'
+      ZITADEL_EXTERNALPORT: 8080
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_MASTERKEY: MasterkeyNeedsToHave32Characters
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: ZITADEL
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Password1!
+    depends_on:
+      zitadel-db:
+        condition: service_healthy
+    networks:
+      - zitadel-network
+    restart: unless-stopped
+
+networks:
+  zitadel-network:
+    driver: bridge
+
+volumes:
+  zitadel-db-data:
