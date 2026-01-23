@@ -32,7 +32,6 @@ CONS (-)
   * Setup Complexity: Requires configuring two services (Hydra + Kratos) and building/customizing UIs using pre-built components.
   * Operations: Self-hosting means managing infrastructure, databases, monitoring, updates, security patches for both services.
   * Integration Work: Social logins and enterprise SSO require configuration and custom integration code.
-  * Learning Curve: Requires understanding OAuth2/OIDC specs, identity flows, and Ory's architecture patterns.
   * Support: Community support only (unless paying for Ory Network or enterprise support).
   * Time-to-Market: Longer initial setup and customization compared to turnkey SaaS solutions.
 
