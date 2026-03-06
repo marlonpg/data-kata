@@ -1,0 +1,17 @@
+{
+  "name": "jdbc-source-sales",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "tasks.max": "1",
+    "connection.url": "jdbc:postgresql://postgres:5432/analytics",
+    "connection.user": "analytics",
+    "connection.password": "analytics",
+    "mode": "timestamp+incrementing",
+    "timestamp.column.name": "updated_at",
+    "incrementing.column.name": "id",
+    "table.whitelist": "public.sales",
+    "topic.prefix": "raw.db.",
+    "poll.interval.ms": "10000",
+    "validate.non.null": "false"
+  }
+}

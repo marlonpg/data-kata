@@ -138,3 +138,26 @@ Create a runnable scaffold under `/poc` with:
 - `docs/` (runbook, lineage map, dashboards)
 
 This gives you a practical baseline without violating the technology restrictions.
+
+---
+
+## 9) Current scaffold status
+
+The following implementation scaffold now exists under `/poc`:
+
+- `docker-compose.yml` for local infrastructure (Kafka, Connect, Schema Registry, Kafka UI, PostgreSQL, Marquez)
+- `.env.example` for local port and service settings
+- `initdb/01_analytics_schema.sql` for analytics aggregate tables
+- `api/`, `streams/`, `ingestion-soap/` Maven starter projects
+- `connectors/` starter connector templates
+- `TRADE_OFFS.md` for tool comparison and decision rationale
+- `GLOSSARY.md` for non-obvious technical terms from this README
+- `STEPS.md` with setup and run instructions
+
+---
+
+## 10) Known PoC caveats
+
+- Kafka Connect plugins (JDBC Source and FilePulse) are not bundled by default in every Connect image; install plugins before registering templates.
+- The Java modules are intentionally starter scaffolds (minimal implementation) to speed up initial bring-up.
+- Production hardening items (auth, secrets, retries, SLOs, robust schema governance) remain in Phase 2.

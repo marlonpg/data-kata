@@ -1,0 +1,13 @@
+{
+  "name": "filepulse-sales",
+  "config": {
+    "connector.class": "io.streamthoughts.kafka.connect.filepulse.source.FilePulseSourceConnector",
+    "tasks.max": "1",
+    "topic": "raw.files.sales",
+    "fs.scan.directory.path": "/data/incoming",
+    "fs.scan.interval.ms": "10000",
+    "read.max.wait.ms": "2000",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}
