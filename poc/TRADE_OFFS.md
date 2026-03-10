@@ -23,10 +23,10 @@
 ### Kafka Streams (chosen)
 **PROS (+)**
   * Integration: Native Kafka library — no separate cluster, no extra deployment. Runs as a plain JVM app alongside the existing Kafka broker.
-  * Deployment: Single JAR per topology. Our `StreamsApplication.java` is ~30 lines. Trivial to run in Docker or bare JVM.
+  * Deployment: Single JAR per topology. Trivial to run in Docker or bare JVM with no cluster orchestration.
   * Latency: True record-at-a-time processing. Sub-second end-to-end latency for our aggregation windows.
-  * Use-case fit: `KTable` + `groupBy` + `windowedBy` + `aggregate` maps directly to our "top sales per city" and "top salesman country" pipelines. Interactive Queries can serve results without a separate DB in future iterations.
-  * Operations: Zero cluster management — scales horizontally by adding app instances (one per partition). For 6 partitions, up to 6 parallel instances.
+  * Use-case fit: `KTable` + `groupBy` + `windowedBy` + `aggregate` maps directly to the "top sales per city" and "top salesman country" pipelines. Interactive Queries can serve results without a separate DB in future iterations.
+  * Operations: Zero cluster management — scales horizontally by adding app instances (one per partition). For N partitions, up to N parallel instances.
   * EOS: Supports exactly-once semantics (EOS v2) out of the box with `processing.guarantee=exactly_once_v2`.
 
 **CONS (-)**
@@ -71,17 +71,17 @@
 
 ### Kafka Connect + custom SOAP producer (chosen)
 **PROS (+)**
-  * Proven connectors: JDBC Source Connector (Confluent) is battle-tested for incremental/CDC ingestion from relational databases. Our config uses `timestamp+incrementing` mode against `public.sales`.
+  * Proven connectors: JDBC Source Connector (Confluent) is battle-tested for incremental/CDC ingestion from relational databases. The recommended mode is `timestamp+incrementing` against the source sales table.
   * Config-driven: Connector definitions are JSON templates — no code to write for DB and file sources. Portable across environments by swapping connection URLs.
   * Parallelism and offset management: Connect handles offset tracking, task distribution, and restarts natively. The JDBC connector remembers the last `updated_at` + `id` per table.
-  * SOAP flexibility: A custom Java producer (our `SoapIngestionApplication`) lets us use JAX-WS/CXF to call WS-* endpoints with full control over WSDL binding, WS-Security headers, and retry logic — things no generic connector supports well.
+  * SOAP flexibility: A custom Java producer using JAX-WS/CXF can call WS-* endpoints with full control over WSDL binding, WS-Security headers, and retry logic — things no generic connector supports well.
 
 **CONS (-)**
   * Plugin management: JDBC Source and FilePulse connectors are **not bundled** in the default `cp-kafka-connect` image. They must be installed manually (confluent-hub install or JAR copy). This is a deployment friction point.
   * FilePulse maturity: StreamThoughts FilePulse is a community connector, not Confluent-supported. Fewer production references and slower bug-fix cadence than Confluent-backed connectors. Alternative: Spooldir connector (more mature but less flexible).
-  * Delivery semantics: Our JDBC connector uses `timestamp+incrementing` mode, which provides **at-least-once** delivery. If the connector restarts mid-poll, duplicate records may appear in `raw.db.sales`. The downstream Streams app must handle deduplication (e.g., by `(id, updated_at)` key).
+  * Delivery semantics: `timestamp+incrementing` mode provides **at-least-once** delivery. If the connector restarts mid-poll, duplicate records may appear on the raw topic. The downstream Streams topology must handle deduplication (e.g., by `(id, updated_at)` composite key).
   * Debugging opacity: Kafka Connect error messages can be cryptic. Failed connectors surface in the REST API (`GET /connectors/status`) but root-cause diagnosis often requires reading Connect worker logs.
-  * No schema enforcement yet: Both connectors use `JsonConverter` with `schemas.enable=false`. This means no schema validation on ingestion — malformed records will flow through silently. Phase 2 should switch to `AvroConverter` + Schema Registry.
+  * No schema enforcement by default: Out-of-the-box connector configurations use `JsonConverter` with no schema validation. Malformed records will flow through silently unless Schema Registry enforcement is added from the start. Phase 2 should switch to `AvroConverter` + Schema Registry.
 
 ### Fully custom ingestion microservices (not chosen)
 **PROS (+)**
@@ -142,14 +142,14 @@
 ### PostgreSQL (chosen)
 **PROS (+)**
   * Familiar: Universal SQL knowledge. Every team member can query, debug, and administer it.
-  * Simplicity: Already in our docker-compose for Marquez and as the JDBC source. Adding an analytics schema to the same instance (or a second instance) is trivial.
-  * Spring Boot integration: Mature JDBC/JPA support. Our `AnalyticsController` reads from PostgreSQL with zero custom driver work.
-  * Sufficient for scale: Our aggregate tables have low cardinality — at most `cities × salesmen × periods` rows (thousands, not millions). PostgreSQL handles this effortlessly with proper indexing.
+  * Simplicity: Can serve dual-purpose in a PoC (lineage DB + analytics sink on the same instance). Adding an analytics schema to a dedicated instance is also trivial.
+  * Spring Boot integration: Mature JDBC/JPA support. Zero custom driver work for the REST API layer.
+  * Sufficient for scale: Aggregate tables have low cardinality — at most `cities × salesmen × periods` rows (thousands, not millions). PostgreSQL handles this effortlessly with proper indexing.
   * Extensions: If analytical query patterns grow, TimescaleDB (PostgreSQL extension) adds time-series optimization and continuous aggregates without changing the database engine.
 
 **CONS (-)**
   * Not columnar: For very large analytical scans (millions of rows, many columns), PostgreSQL's row-based storage is slower than columnar engines.
-  * No separation of concerns (current setup): The same PostgreSQL instance serves as both the JDBC source (`public.sales`) and the analytics sink (`analytics.*`). Production should use separate instances to isolate OLTP from OLAP load.
+  * No separation of concerns (if reusing one instance): Using the same PostgreSQL for both the JDBC source and the analytics sink conflates OLTP and OLAP workloads. Production should use separate instances.
 
 ### ClickHouse (future option)
 **PROS (+)**
@@ -173,7 +173,7 @@
 
 **Decision:** PostgreSQL. The aggregate tables are small, the team knows it, it's already in our stack, and Spring Boot integration is effortless. ClickHouse would only be justified if we later serve raw event data or aggregations over millions of rows directly.
 
-**Risk:** Using the same PostgreSQL instance for both source (`public.sales`) and sink (`analytics.*`) conflates OLTP and OLAP workloads. In production, these should be separate instances. For the PoC, this is acceptable.
+**Risk:** If a single PostgreSQL instance is used for both the ingestion source and the analytics sink, OLTP and OLAP workloads will compete for resources. Plan for separate instances before production.
 
 ---
 
@@ -184,13 +184,13 @@
 ### OpenLineage + Marquez (chosen)
 **PROS (+)**
   * Open standard: OpenLineage is a cross-platform lineage spec adopted by Airflow, Spark, dbt, and others. Future-proofs lineage metadata format.
-  * Built-in UI: Marquez Web (port 3000) provides dataset/job/run visualization out of the box — no custom frontend needed.
-  * API-first: Marquez API (port 5000) accepts lineage events via REST. Kafka Streams apps and Connect jobs can emit events with a small client library.
+  * Built-in UI: Marquez Web provides dataset/job/run visualization out of the box — no custom frontend needed.
+  * API-first: Marquez API accepts lineage events via REST. Kafka Streams apps and Connect jobs can emit events with a small client library.
   * Community momentum: Active LFAI & Data project with growing ecosystem support.
 
 **CONS (-)**
-  * Infrastructure cost: Adds 3 containers (Marquez API, Marquez Web, Marquez DB) to the stack. That's significant for a PoC.
-  * Integration gap: As of now, our pipeline components do **not** emit OpenLineage events yet. The infrastructure is running but not instrumented. This is a Phase 2 task.
+  * Infrastructure cost: Requires 3 additional containers (Marquez API, Marquez Web, Marquez DB). That's non-trivial overhead for a PoC.
+  * Instrumentation effort: Pipeline components (Streams app, Connect jobs) must be explicitly instrumented to emit OpenLineage events. This is not automatic — it requires integrating the OpenLineage Java client.
   * Learning curve: Understanding OpenLineage facets (schema, source, SQL), namespaces, and job hierarchies takes time.
 
 ### Custom lineage tables in PostgreSQL
@@ -204,15 +204,15 @@
   * Non-standard: Custom schema means no interoperability with other tools (dbt, Airflow, Spark) that speak OpenLineage.
   * Maintenance: As the pipeline grows, maintaining a custom lineage model becomes increasingly painful vs adopting a purpose-built tool.
 
-**Decision:** OpenLineage + Marquez. The infrastructure is already running in docker-compose. The next step is instrumenting the Kafka Streams app and Connect jobs to emit lineage events. The upfront cost is higher, but the long-term benefit (standard format, UI, interoperability) outweighs a throwaway custom table.
+**Decision:** OpenLineage + Marquez. The upfront infrastructure cost is higher, but the long-term benefit (standard format, UI, interoperability with future tools) outweighs a throwaway custom table. Instrumentation of pipeline components (Streams app, Connect jobs) must be planned from day one — not deferred.
 
-**Current gap:** Marquez infrastructure is deployed but **not yet receiving lineage events**. Phase 2 must add OpenLineage client calls to the Streams app and register Connect jobs as lineage sources.
+**Note:** Pipeline instrumentation is not automatic. Phase 1 should include the OpenLineage client library in both the Streams app and ingestion services so lineage events are emitted from the first run.
 
 ---
 
 ## 6. Schema Governance: Avro vs JSON Schema vs Protobuf
 
-> **Note:** Schema governance is a **Phase 2** item. Currently all connectors and producers use `JsonConverter` with `schemas.enable=false`, meaning no schema validation on ingestion. This section evaluates options for when we add Schema Registry enforcement.
+> **Note:** Schema governance is a **Phase 2** item. All connectors and producers should start with `JsonConverter` to keep PoC setup simple, but Schema Registry enforcement must be planned before production. This section evaluates which serialization format to adopt when that time comes.
 
 ### Avro + Schema Registry
 **PROS (+)**
@@ -243,17 +243,17 @@
   * Connect support: Some older Kafka Connect connectors have limited Protobuf support. Requires `ProtobufConverter`.
   * Adoption: If the team and tooling are already Avro-oriented, adding Protobuf creates fragmentation.
 
-**Decision (planned for Phase 2):** Avro + Schema Registry. It's the Confluent ecosystem default, all our connectors support it, and the code generation fits our Java stack. Switch connectors from `JsonConverter` to `AvroConverter` and define `.avsc` schemas for `raw.db.sales`, `raw.files.sales`, `raw.soap.sales`, and `curated.sales_events`.
+**Decision (planned for Phase 2):** Avro + Schema Registry. It's the Confluent ecosystem default, all standard connectors support it, and `avro-maven-plugin` code generation fits the Java stack. The migration path is to switch connectors from `JsonConverter` to `AvroConverter` and define `.avsc` schemas for all raw and curated topics.
 
 ---
 
 ## 7. Observability: Prometheus + Grafana vs ELK
 
-> **Note:** Observability infrastructure is **not yet deployed** in the PoC docker-compose. The README references Prometheus, Grafana, and OpenTelemetry as planned. This section evaluates the options.
+> **Note:** Observability infrastructure is a **Phase 2** item. The PoC runs without monitoring to keep initial setup lean. This section evaluates the target observability stack for when the pipeline is hardened for production.
 
 ### Prometheus + Grafana + OpenTelemetry (planned)
 **PROS (+)**
-  * JVM-native: Spring Boot Actuator exposes Prometheus metrics at `/actuator/prometheus` (already configured in our API's `application.yml`). Kafka Streams exposes JMX metrics that Prometheus can scrape via JMX Exporter.
+  * JVM-native: Spring Boot Actuator can expose Prometheus metrics at `/actuator/prometheus` with minimal configuration. Kafka Streams exposes JMX metrics that Prometheus can scrape via JMX Exporter.
   * Lightweight: Prometheus is a single binary. Grafana provides mature dashboarding with pre-built Kafka and JVM dashboard templates.
   * Tracing: OpenTelemetry Java agent provides distributed tracing across the API, Streams app, and Kafka without code changes.
   * Alerting: Alertmanager integrates with Prometheus for threshold-based alerts (lag, error rate, latency).
@@ -272,7 +272,7 @@
   * Constraint alignment: Logstash pipelines are often configured with Ruby filters or custom scripts. While not Python, the ecosystem is heavier than Prometheus.
   * Operational overhead: ELK cluster management (index lifecycle, shard allocation, upgrades) is non-trivial.
 
-**Decision (planned for Phase 2):** Prometheus + Grafana + OpenTelemetry. Lighter footprint, better fit for JVM/Kafka monitoring, and Spring Boot already exposes Prometheus metrics. ELK may be added later specifically for centralized log aggregation if needed.
+**Decision (planned for Phase 2):** Prometheus + Grafana + OpenTelemetry. Lighter footprint, better fit for JVM/Kafka monitoring, and Spring Boot Actuator integration is trivial. ELK may be added later specifically for centralized log aggregation if needed.
 
 ---
 
@@ -282,9 +282,9 @@
 |---|------|-----------|--------|------------|
 | 1 | FilePulse connector instability in production | Medium | High | Fall back to Spooldir connector or custom Java file-watcher producer |
 | 2 | Duplicate records from JDBC at-least-once delivery | High | Medium | Deduplicate in Kafka Streams by `(id, updated_at)` composite key |
-| 3 | No schema validation (JsonConverter, schemas.enable=false) | High | Medium | Phase 2: switch to AvroConverter + Schema Registry with compatibility policies |
-| 4 | Same PostgreSQL instance for OLTP source and OLAP sink | Low (PoC) | Low (PoC) | Production: separate instances for source DB and analytics DB |
-| 5 | Marquez deployed but not instrumented | Medium | Low | Phase 2: add OpenLineage client to Streams app and register Connect jobs |
+| 3 | No schema validation in Phase 1 (JsonConverter) | High | Medium | Phase 2: switch to AvroConverter + Schema Registry with compatibility policies |
+| 4 | Single PostgreSQL instance for OLTP source and OLAP sink | Low (PoC) | Low (PoC) | Plan separate instances before production |
+| 5 | Lineage instrumentation not included in Phase 1 | Medium | Low | Include OpenLineage client in Streams app and ingestion services from Phase 1 |
 | 6 | Kafka Streams partition-bound scaling | Low | Medium | Increase topic partitions; if insufficient, evaluate Flink SQL migration |
 | 7 | Connect plugin versions not pinned | Medium | Medium | Build custom Connect Docker image with pre-installed, version-pinned plugins |
 
@@ -296,8 +296,8 @@
 - **Ingestion:** Hybrid Kafka Connect (JDBC + FilePulse) for standard sources + custom Java producer for SOAP. Minimizes custom code while handling the hardest integration (WS-*) with full flexibility.
 - **Orchestration:** Deferred to Phase 2. No orchestrator needed yet — evaluate Argo Workflows (if K8s) or Jenkins (if not) when scheduling requirements emerge.
 - **Serving DB:** PostgreSQL — already in the stack, team knows it, aggregate tables are small. ClickHouse only if raw event analytics are needed later.
-- **Lineage:** OpenLineage + Marquez — infrastructure deployed, instrumentation pending in Phase 2.
-- **Schema governance (Phase 2):** Avro + Schema Registry. Switch from JsonConverter to AvroConverter with `.avsc` schemas for all topics.
-- **Observability (Phase 2):** Prometheus + Grafana + OpenTelemetry. Spring Boot Actuator metrics already exposed.
+- **Lineage:** OpenLineage + Marquez — plan instrumentation of pipeline components from day one, not as an afterthought.
+- **Schema governance (Phase 2):** Avro + Schema Registry. Start with JsonConverter for PoC simplicity; migrate to AvroConverter with `.avsc` schemas for all topics in Phase 2.
+- **Observability (Phase 2):** Prometheus + Grafana + OpenTelemetry. Spring Boot Actuator makes Prometheus integration minimal effort.
 
-**Biggest immediate risks:** no schema validation on ingestion, potential duplicates from JDBC connector, and Marquez running without actual lineage events. All are addressed in the Phase 2 hardening plan.
+**Biggest risks to address early:** schema validation gaps on ingestion, potential duplicate records from JDBC at-least-once delivery, and lineage instrumentation being skipped. All should be addressed in the Phase 2 hardening plan.
