@@ -1,0 +1,18 @@
+{
+  "name": "jdbc-source-sales",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+    "connection.url": "jdbc:postgresql://source-db:5432/salesdb",
+    "connection.user": "sales",
+    "connection.password": "sales123",
+    "table.whitelist": "sales",
+    "mode": "incrementing",
+    "incrementing.column.name": "sale_id",
+    "poll.interval.ms": "5000",
+    "topic.prefix": "",
+    "transforms": "routeToSalesDb",
+    "transforms.routeToSalesDb.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.routeToSalesDb.regex": ".*",
+    "transforms.routeToSalesDb.replacement": "sales-db"
+  }
+}

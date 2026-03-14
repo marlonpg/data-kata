@@ -1,0 +1,307 @@
+version: '3.8'
+
+services:
+  # =============================================
+  # KAFKA INFRASTRUCTURE
+  # =============================================
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    healthcheck:
+      test: kafka-topics --bootstrap-server kafka:29092 --list
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ['/bin/bash', '-c']
+    command: |
+      "
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic sales-db --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic sales-file --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic sales-ws --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic top-sales-per-city --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic top-salesman-country --partitions 3 --replication-factor 1
+      echo 'All topics created successfully'
+      "
+
+  kafka-connect:
+    build: ./integration/kafka-connect
+    hostname: kafka-connect
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:29092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_GROUP_ID: compose-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: 'false'
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: 'false'
+    depends_on:
+      kafka:
+        condition: service_healthy
+      source-db:
+        condition: service_healthy
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # =============================================
+  # DATA SOURCES
+  # =============================================
+  source-db:
+    image: postgres:16
+    container_name: source-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: salesdb
+      POSTGRES_USER: sales
+      POSTGRES_PASSWORD: sales123
+    volumes:
+      - ./integration/source/source-db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sales -d salesdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # =============================================
+  # DATA TARGET
+  # =============================================
+  target-db:
+    image: postgres:16
+    container_name: target-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: analyticsdb
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics123
+    volumes:
+      - ./integration/sales-service/target-db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analytics -d analyticsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # =============================================
+  # SIMULATORS
+  # =============================================
+  file-simulator:
+    build: ./integration/source/file-simulator
+    container_name: file-simulator
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  ws-simulator:
+    build: ./integration/source/ws-simulator
+    container_name: ws-simulator
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  # =============================================
+  # KAFKA STREAMS PROCESSING
+  # =============================================
+  kafka-streams:
+    build: ./integration/kafka-streams
+    container_name: kafka-streams
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_KAFKA_STREAMS_BOOTSTRAP_SERVERS: kafka:29092
+      TARGET_DB_URL: jdbc:postgresql://target-db:5432/analyticsdb
+      TARGET_DB_USER: analytics
+      TARGET_DB_PASSWORD: analytics123
+      OPENLINEAGE_URL: http://marquez:5000
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      target-db:
+        condition: service_healthy
+
+  # =============================================
+  # ANALYTICS API
+  # =============================================
+  api:
+    build: ./integration/sales-service/api
+    container_name: api
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://target-db:5432/analyticsdb
+      SPRING_DATASOURCE_USERNAME: analytics
+      SPRING_DATASOURCE_PASSWORD: analytics123
+    depends_on:
+      target-db:
+        condition: service_healthy
+
+  # =============================================
+  # CONNECTOR REGISTRATION
+  # =============================================
+  connector-init:
+    image: curlimages/curl:latest
+    container_name: connector-init
+    volumes:
+      - ./integration/connectors:/connectors
+    depends_on:
+      kafka-connect:
+        condition: service_started
+    entrypoint: ['/bin/sh', '-c']
+    command: |
+      "
+      echo 'Waiting for Kafka Connect to be ready...'
+      while ! curl -s http://kafka-connect:8083/connectors > /dev/null 2>&1; do
+        echo 'Kafka Connect not ready yet...'
+        sleep 5
+      done
+      echo 'Kafka Connect is ready!'
+      curl -X POST http://kafka-connect:8083/connectors \
+        -H 'Content-Type: application/json' \
+        -d @/connectors/jdbc-source-sales.json
+      echo ''
+      echo 'JDBC Source Connector registered!'
+      "
+
+  # =============================================
+  # DATA LINEAGE (MARQUEZ / OPENLINEAGE)
+  # =============================================
+  marquez-db:
+    image: postgres:16
+    container_name: marquez-db
+    environment:
+      POSTGRES_DB: marquez
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marquez -d marquez"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  marquez:
+    image: marquezproject/marquez:latest
+    container_name: marquez
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    environment:
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: marquez
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+
+  marquez-web:
+    image: marquezproject/marquez-web:latest
+    container_name: marquez-web
+    ports:
+      - "3000:3000"
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: 5000
+    depends_on:
+      - marquez
+
+  # =============================================
+  # OBSERVABILITY
+  # =============================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./integration/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./integration/observability/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./integration/observability/loki/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./integration/observability/promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
