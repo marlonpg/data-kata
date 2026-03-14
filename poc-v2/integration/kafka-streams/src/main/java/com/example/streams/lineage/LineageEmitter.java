@@ -93,7 +93,7 @@ public class LineageEmitter {
         event.put("run", run);
 
         Map<String, Object> job = new LinkedHashMap<>();
-        job.put("namespace", "kafka-streams");
+        job.put("namespace", "data-pipeline");
         job.put("name", jobName);
         event.put("job", job);
 
@@ -101,8 +101,8 @@ public class LineageEmitter {
         List<Map<String, Object>> inputs = new ArrayList<>();
         for (String topic : List.of("sales-db", "sales-file", "sales-ws")) {
             Map<String, Object> input = new LinkedHashMap<>();
-            input.put("namespace", "kafka");
-            input.put("name", topic);
+            input.put("namespace", "data-pipeline");
+            input.put("name", "kafka." + topic);
             input.put("facets", buildInputSchemaFacet());
             inputs.add(input);
         }
@@ -111,8 +111,8 @@ public class LineageEmitter {
         // Output dataset - PostgreSQL table
         List<Map<String, Object>> outputs = new ArrayList<>();
         Map<String, Object> output = new LinkedHashMap<>();
-        output.put("namespace", "postgresql");
-        output.put("name", "analyticsdb." + outputTable);
+        output.put("namespace", "data-pipeline");
+        output.put("name", "postgresql.analyticsdb." + outputTable);
         output.put("facets", buildOutputSchemaFacet(outputTable));
         outputs.add(output);
         event.put("outputs", outputs);
